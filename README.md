@@ -1,144 +1,131 @@
 # CareQueue
 
-A research-only, end-to-end machine learning project for hospital
-readmission risk estimation and capacity-constrained discharge follow-up.
+Predict 30-day hospital readmission risk at discharge, then rank patients
+for a fixed follow-up capacity.
 
-## Problem
+Built on the UCI Diabetes 130-US Hospitals dataset (~100K encounters).
+Not a clinical product — portfolio / research code only.
 
-A care coordinator has limited follow-up capacity. CareQueue estimates
-readmission risk at discharge and ranks eligible encounters for a
-fixed-size follow-up queue.
+## Why this exists
 
-Predicted risk does not measure the causal benefit of follow-up.
+Hospitals cannot call every discharged patient the same day. CareQueue
+scores eligible encounters and returns a top-k follow-up queue given a
+capacity budget.
 
-## Dataset
+Risk ≠ benefit of calling. This project ranks who to contact first; it
+does not estimate whether follow-up prevents readmission.
 
-UCI Diabetes 130-US Hospitals for Years 1999–2008.
+## Setup
 
-- Dataset: https://archive.ics.uci.edu/dataset/296/diabetes+130-us+hospitals+for+years+1999-2008
-- Associated study: https://doi.org/10.1155/2014/781670
-
-Review the dataset's current reuse terms and citation requirements
-before redistributing it. Raw data and model artifacts are not committed.
-
-## Quick start
-
-Use Python 3.11+ (validated locally on 3.12).
+Python 3.11+ (tested on 3.12).
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r requirements.txt
+pip install -r requirements.txt
 pytest -q
 python -m carequeue.train --download
+```
+
+Pinned deps (optional): `pip install -r requirements.lock.txt`
+
+### API
+
+```bash
 uvicorn carequeue.api:app --host 127.0.0.1 --port 8000
+# docs: http://127.0.0.1:8000/docs
 ```
 
-In another activated terminal:
+### Dashboard
 
 ```bash
-python -m streamlit run carequeue/dashboard.py
+streamlit run carequeue/dashboard.py
 ```
 
-Windows PowerShell activation:
-
-```powershell
-.venv\Scripts\Activate.ps1
-```
-
-For a pinned environment after validation:
+### Drift check (after training)
 
 ```bash
-python -m pip install -r requirements.lock.txt
+python -c "from carequeue.core import read_csv, prepare_cohort, FEATURES; \
+prepare_cohort(read_csv('data/diabetic_data.csv')).sample(1000, random_state=42)[FEATURES] \
+.to_csv('data/demo_batch.csv', index=False)"
+python -m carequeue.monitor --input data/demo_batch.csv
 ```
 
-## Method
+### Docker
 
-Patients are disjoint across training, model selection, probability
-calibration, and testing (~60% / 10% / 10% / 20% by patient groups).
+```bash
+docker build -t carequeue .
+docker run --rm -p 127.0.0.1:8000:8000 -v "$(pwd)/artifacts:/app/artifacts:ro" carequeue
+```
 
-Candidate models are logistic regression and histogram gradient boosting.
-Selection uses average precision. Calibration is fitted on a separate
-partition. Test results include calibration, capacity-based evaluation,
-patient-cluster bootstrap uncertainty, and subgroup summaries.
+Or use `make install test train api`.
 
-Race and gender are excluded from predictors but audited on the test set.
-Death/hospice discharge dispositions are excluded from the eligible cohort.
+## Approach
 
-The split is not chronological — the released data do not support a clean
-deployment-time simulation.
+- Eligible cohort excludes death/hospice discharge dispositions
+- Patient-level splits (no shared `patient_nbr` across train / selection /
+  calibration / test)
+- Models: logistic regression vs histogram gradient boosting
+- Selection metric: average precision
+- Separate calibration fold; held-out test never used for fitting
+- Queue metrics at 10% capacity (precision, recall, lift)
+- Subgroup audit on race / gender / age (attributes not used as features)
+- Numeric PSI drift report against the training reference
 
-## Outputs
-
-Training writes `artifacts/model.joblib` and `artifacts/metrics.json`.
-
-The API exposes `/health`, `/model-info`, `/predict`, `/triage`, and `/docs`.
-
-Offline monitoring checks numeric input drift and missingness.
-It does not establish model performance or clinical safety.
+Splits are random by patient, not chronological — the public file does
+not support a clean time-based deployment simulation.
 
 ## Results
 
-Verified after local training on the UCI archive
-(dataset SHA-256 prefix `0689e7ec…`, seed `42`).
+Local run on the UCI zip (seed 42, SHA-256 prefix `0689e7ec`):
 
-| Metric | Prevalence baseline | Selected model (calibrated) |
+| | Baseline | Model |
 |---|---:|---:|
-| Eligible encounters | — | 99,343 (2,423 excluded) |
-| Selected model | — | histogram gradient boosting |
-| Test encounters | 19,821 | 19,821 |
+| Eligible encounters | — | 99,343 |
+| Model | — | hist. gradient boosting |
+| Test n | 19,821 | 19,821 |
 | Positive rate | 11.1% | 11.1% |
-| Average precision | 0.111 | **0.218** |
+| Average precision | 0.111 | 0.218 |
 | ROC-AUC | 0.500 | 0.662 |
-| Brier score | 0.099 | 0.095 |
-| Precision @ 10% capacity | — | 0.261 |
-| Recall @ 10% capacity | — | 0.235 |
-| Lift @ 10% capacity | — | **2.35×** |
+| Brier | 0.099 | 0.095 |
+| Precision @ 10% | — | 0.261 |
+| Recall @ 10% | — | 0.235 |
+| Lift @ 10% | — | 2.35× |
 
-Patient-cluster bootstrap 95% interval for test average precision:
-**0.198 – 0.239** (200 valid resamples).
+Bootstrap 95% CI for test AP (patient blocks): 0.198 – 0.239.
 
-Selection-set average precision: logistic `0.214`, gradient boosting `0.228`.
+Selection AP: logistic 0.214, boosting 0.228. Calibration barely moved
+Brier on this run; both calibrated and raw scores are in
+`artifacts/metrics.json`.
 
-Calibration changed Brier score only marginally on this run
-(uncalibrated AP matched calibrated AP at `0.218`). Both are reported in
-`artifacts/metrics.json` so calibration can be discussed honestly.
+## API
 
-These numbers are retrospective research results on historical data.
-They are not evidence of clinical effectiveness or transportability to a
-present-day hospital.
+| Endpoint | Purpose |
+|---|---|
+| `GET /health` | readiness + model version |
+| `GET /model-info` | metadata |
+| `POST /predict` | single encounter score |
+| `POST /triage` | capacity-limited ranked queue |
 
-## Limitations and intended use
-
-This project uses historical observational data.
-
-- Readmissions outside the source data may not be captured.
-- Administrative codes and subgroup labels have limitations.
-- Removing protected attributes does not establish fairness.
-- A high-risk prediction does not prove that an intervention will help.
-- The software is not validated for clinical use.
-
-Use synthetic inputs in public demonstrations.
-Do not upload identifiable patient data.
-
-## Reproducibility
-
-Training records the dataset checksum, random seed, split counts,
-Python version, and scikit-learn version.
-
-`requirements.lock.txt` captures a validated local environment.
-CI installs from `requirements.txt` ranges for compatibility.
-
-Only load model artifacts that you trust. Joblib artifacts can execute code.
-
-## Project layout
+## Layout
 
 ```
-carequeue/
-├── carequeue/          # core, train, api, dashboard, monitor
-├── tests/              # synthetic contract tests
-├── .github/workflows/  # CI
-├── Dockerfile
-├── requirements.txt
-└── requirements.lock.txt
+carequeue/     core, train, api, dashboard, monitor
+tests/         synthetic contract tests
+artifacts/     local only (gitignored)
+data/          local only (gitignored)
 ```
+
+## Data
+
+- https://archive.ics.uci.edu/dataset/296/diabetes+130-us+hospitals+for+years+1999-2008
+- Paper: https://doi.org/10.1155/2014/781670
+
+Raw CSV and trained artifacts are not in git. Check UCI terms before
+redistributing the data.
+
+## Limits
+
+Old observational data, incomplete readmission capture possible, no claim
+of fairness from dropping race/gender, no causal estimate of follow-up
+benefit, not validated for clinical use. Demo with synthetic inputs only.

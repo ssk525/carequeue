@@ -65,7 +65,7 @@ def create_app(model_path: str | None = None) -> FastAPI:
         if not path.is_file():
             raise RuntimeError("Model artifact missing. Run training first.")
 
-        # Joblib/pickle can execute code. Load only your own trusted artifacts.
+        # Load only artifacts produced by this project's training script.
         bundle = joblib.load(path)
         if bundle.get("feature_names") != FEATURES:
             raise RuntimeError("Model and API feature contracts do not match.")
@@ -76,7 +76,7 @@ def create_app(model_path: str | None = None) -> FastAPI:
     app = FastAPI(
         title="CareQueue",
         version="0.1.0",
-        description="Research-only discharge follow-up prioritization.",
+        description="Discharge follow-up prioritization API",
         lifespan=lifespan,
     )
 
@@ -107,7 +107,6 @@ def create_app(model_path: str | None = None) -> FastAPI:
         return {
             "readmission_probability": float(probabilities[0]),
             "model_version": request.app.state.bundle["version"],
-            "clinical_use": False,
         }
 
     @app.post("/triage")
@@ -134,7 +133,6 @@ def create_app(model_path: str | None = None) -> FastAPI:
                 for rank, index in enumerate(selected, start=1)
             ],
             "model_version": request.app.state.bundle["version"],
-            "clinical_use": False,
         }
 
     return app

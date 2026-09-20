@@ -42,8 +42,7 @@ def example_record():
 def synthetic_dataset(patients=80):
     records = []
     for patient in range(patients):
-        # Both outcomes per synthetic patient ensure both classes in
-        # every group partition. This is a software fixture, not biology.
+        # Two visits per patient so every split sees both classes.
         for visit in range(2):
             record = example_record()
             record.update({

@@ -13,11 +13,8 @@ from carequeue.core import (
 
 st.set_page_config(page_title="CareQueue", layout="wide")
 st.title("CareQueue")
-st.caption("Hospital readmission risk and follow-up prioritization prototype")
-st.warning(
-    "Research demonstration only. Use synthetic inputs. "
-    "This is not medical advice or a validated clinical system."
-)
+st.caption("Discharge readmission risk scoring and follow-up queue demo")
+st.info("Synthetic inputs only — not for clinical decisions.")
 
 api_url = os.getenv("API_URL", "http://127.0.0.1:8000").rstrip("/")
 
@@ -60,12 +57,9 @@ with st.form("encounter"):
         for name in ID_CATEGORIES:
             record[name] = st.text_input(name, value="1")
 
-        st.caption(
-            "Administrative IDs follow the UCI mapping. "
-            "Default ID values are synthetic examples."
-        )
+        st.caption("Admission / discharge IDs use the UCI code mapping.")
 
-    submitted = st.form_submit_button("Estimate research risk")
+    submitted = st.form_submit_button("Score encounter")
 
 if submitted:
     try:
@@ -77,18 +71,14 @@ if submitted:
         response.raise_for_status()
         result = response.json()
         st.metric(
-            "Estimated readmission probability",
+            "30-day readmission probability",
             f"{result['readmission_probability']:.1%}",
         )
-        st.caption(f"Model: {result['model_version']}")
-        st.info(
-            "A risk estimate is not a diagnosis and does not estimate "
-            "the benefit of an intervention."
-        )
+        st.caption(f"Model version: {result['model_version']}")
     except requests.HTTPError as exc:
         st.error(f"API rejected the request: {exc.response.text}")
     except requests.RequestException:
-        st.error("Cannot reach the API. Start the FastAPI service first.")
+        st.error("API unreachable — start uvicorn first.")
 
 metrics_path = Path("artifacts/metrics.json")
 if metrics_path.exists():

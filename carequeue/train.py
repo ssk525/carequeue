@@ -70,7 +70,6 @@ def download_dataset(destination: Path) -> None:
         if member.file_size > limit:
             raise ValueError("Dataset exceeds the extracted size limit.")
 
-        # Read only the expected member; do not extract arbitrary paths.
         data = archive.read(member)
 
     destination.write_bytes(data)
@@ -155,7 +154,7 @@ def train(data_path: Path, output: Path) -> dict:
     winner = max(selection_scores, key=selection_scores.get)
     model = models[winner]
 
-    # Do not retrain on calibration or test data.
+    # Calibrate on a held-out patient group; leave test untouched.
     calibrator = fit_calibrator(
         model,
         x["calibration"],
@@ -236,8 +235,6 @@ def train(data_path: Path, output: Path) -> dict:
         "selection_average_precision": selection_scores,
         "test": evaluate(y["test"], predictions),
         "uncalibrated_test": evaluate(y["test"], raw_predictions),
-        # Queue metrics are omitted for this constant-score baseline:
-        # arbitrary tie ordering would make them misleading.
         "prevalence_baseline_test": {
             key: baseline_metrics[key]
             for key in ["average_precision", "roc_auc", "brier_score"]
@@ -258,7 +255,7 @@ def train(data_path: Path, output: Path) -> dict:
         "dataset_sha256": checksum,
         "selected_model": winner,
         "prediction_time": "discharge",
-        "intended_use": "Retrospective research demonstration only",
+        "intended_use": "portfolio / research demo — not for clinical use",
     }
 
     output.mkdir(parents=True, exist_ok=True)

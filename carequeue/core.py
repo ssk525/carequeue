@@ -17,7 +17,7 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 SEED = 42
 
-# These bounds are input sanity checks for the demo, not clinical rules.
+# Input bounds for the API / demos (not clinical thresholds).
 NUMERIC_BOUNDS = {
     "time_in_hospital": (1, 60),
     "num_lab_procedures": (0, 500),
@@ -48,12 +48,12 @@ NUMERIC = list(NUMERIC_BOUNDS)
 CATEGORICAL = ["age", *ID_CATEGORIES, *list(CATEGORY_VALUES)[1:]]
 FEATURES = NUMERIC + CATEGORICAL
 
-# Verify against the dataset's discharge-disposition mapping before reuse.
+# Death / hospice dispositions (UCI discharge_disposition_id).
 EXCLUDED_DISPOSITIONS = {"11", "13", "14", "19", "20", "21"}
 
 
 def read_csv(path) -> pd.DataFrame:
-    # Preserve literal "None"; interpret only "?" and blank strings as missing.
+    # Keep literal "None" lab categories; treat "?" / blanks as missing.
     return pd.read_csv(
         path,
         dtype=str,
@@ -79,8 +79,6 @@ def prepare_cohort(raw: pd.DataFrame) -> pd.DataFrame:
 
     disposition = raw["discharge_disposition_id"].astype(str)
     eligible = disposition.notna() & ~disposition.isin(EXCLUDED_DISPOSITIONS)
-
-    # A missing disposition cannot establish eligibility.
     eligible &= raw["discharge_disposition_id"].notna()
     frame = raw.loc[eligible].copy()
     frame["target"] = (frame["readmitted"] == "<30").astype(int)
@@ -198,7 +196,6 @@ def make_model(kind: str) -> Pipeline:
             max_iter=150,
             max_leaf_nodes=15,
             l2_regularization=2.0,
-            # Avoid an internal encounter-random validation split.
             early_stopping=False,
             random_state=SEED,
         )
@@ -238,7 +235,7 @@ def top_k_indices(probabilities, capacity: int) -> np.ndarray:
     if not 0 <= capacity <= len(p):
         raise ValueError("Capacity must be between zero and batch size.")
 
-    # Stable ordering makes ties deterministic for a given batch.
+    # Stable sort so tied scores keep input order.
     return np.argsort(-p, kind="stable")[:capacity]
 
 
